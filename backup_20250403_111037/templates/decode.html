@@ -1,0 +1,41 @@
+{% extends 'base.html' %}
+
+{% block title %}Decode - Steganography App{% endblock %}
+
+{% block content %}
+<h1 class="mb-4">Extract Hidden Message</h1>
+
+<div class="row">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-body">
+                <form method="POST" enctype="multipart/form-data">
+                    <div class="mb-3">
+                        <label for="file" class="form-label">Select an image with a hidden message</label>
+                        <input class="form-control" type="file" id="file" name="file" accept=".png,.jpg,.jpeg" required>
+                        <div class="form-text">Max file size: 16MB</div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Extract Message</button>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">How Decoding Works</h5>
+                <p class="card-text">
+                    Our steganography tool analyzes the image to find the hidden message. It examines the 
+                    least significant bits of color values in each pixel to extract the hidden data.
+                </p>
+                <h6 class="mt-3">Important Notes:</h6>
+                <ul>
+                    <li>Only images encoded with our tool can be decoded</li>
+                    <li>The image must not have been modified or resized</li>
+                    <li>If image editing or compression occurred, the message may be lost</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

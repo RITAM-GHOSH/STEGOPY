@@ -1,0 +1,46 @@
+{% extends 'base.html' %}
+
+{% block title %}Encode - Steganography App{% endblock %}
+
+{% block content %}
+<h1 class="mb-4">Hide a Message in an Image</h1>
+
+<div class="row">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-body">
+                <form method="POST" enctype="multipart/form-data">
+                    <div class="mb-3">
+                        <label for="file" class="form-label">Select an image file (PNG or JPG)</label>
+                        <input class="form-control" type="file" id="file" name="file" accept=".png,.jpg,.jpeg" required>
+                        <div class="form-text">Max file size: 16MB</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="message" class="form-label">Secret message to hide</label>
+                        <textarea class="form-control" id="message" name="message" rows="5" required></textarea>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Encode Message</button>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">How Encoding Works</h5>
+                <p class="card-text">
+                    Our steganography tool hides your message in the image by making tiny, imperceptible changes 
+                    to the color values of pixels. The modified image will look identical to the original to the naked eye.
+                </p>
+                <h6 class="mt-3">Tips:</h6>
+                <ul>
+                    <li>Larger images can store more text</li>
+                    <li>PNG images work best for steganography</li>
+                    <li>The encoded image will be saved as a PNG</li>
+                    <li>Keep your message reasonable in length</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,46 @@
+{% extends 'base.html' %}
+
+{% block title %}Home - Steganography App{% endblock %}
+
+{% block content %}
+<div class="jumbotron">
+    <h1 class="display-4">Hide Messages in Images</h1>
+    <p class="lead">Steganography allows you to hide secret text messages inside regular images. The image will look normal to everyone, but will contain your hidden message.</p>
+    <hr class="my-4">
+    <p>Use our simple tools to encode messages into images or extract hidden messages from images you've received.</p>
+    <div class="d-grid gap-2 d-md-flex justify-content-md-start">
+        <a href="{{ url_for('encode') }}" class="btn btn-primary btn-lg me-md-2">Hide a Message</a>
+        <a href="{{ url_for('decode') }}" class="btn btn-secondary btn-lg">Reveal a Message</a>
+    </div>
+</div>
+
+<div class="row mt-5">
+    <div class="col-md-4">
+        <div class="card mb-4">
+            <div class="card-body">
+                <h5 class="card-title">Hide Messages</h5>
+                <p class="card-text">Hide your secret text inside an image. The image will look unchanged to the human eye.</p>
+                <a href="{{ url_for('encode') }}" class="btn btn-primary">Encode</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card mb-4">
+            <div class="card-body">
+                <h5 class="card-title">Reveal Messages</h5>
+                <p class="card-text">Extract hidden text from an image that was created using our tool.</p>
+                <a href="{{ url_for('decode') }}" class="btn btn-primary">Decode</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card mb-4">
+            <div class="card-body">
+                <h5 class="card-title">How It Works</h5>
+                <p class="card-text">Learn about the technology behind steganography and how we hide data in images.</p>
+                <a href="{{ url_for('about') }}" class="btn btn-primary">Learn More</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

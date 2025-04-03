@@ -1,0 +1,1319 @@
+# Steganography Application Export
+# Generated: 2025-04-03 11:10:34
+
+
+
+================================================================================
+# FILE: cli.py
+================================================================================
+
+"""
+Command-line interface for the steganography application.
+"""
+import argparse
+import os
+import sys
+import logging
+from stegano import Steganography, SteganographyError
+from utils import (
+    validate_image_path, 
+    validate_output_path, 
+    display_progress, 
+    estimate_encoding_capacity,
+    is_likely_steganographic_image,
+    safe_text_read
+)
+
+def parse_arguments():
+    """
+    Parse command-line arguments for the steganography application.
+    
+    Returns:
+        argparse.Namespace: Parsed arguments
+    """
+    parser = argparse.ArgumentParser(
+        description="StegaPy - A Python-based steganography tool for hiding text in images",
+        epilog="Example: python main.py -e -i input.png -t 'Secret message' -o output.png"
+    )
+    
+    # Create group for encoding and decoding operations
+    operation_group = parser.add_mutually_exclusive_group(required=True)
+    operation_group.add_argument('-e', '--encode', action='store_true', help='Encode text into an image')
+    operation_group.add_argument('-d', '--decode', action='store_true', help='Decode text from an image')
+    
+    # Image input is always required
+    parser.add_argument('-i', '--image', required=True, help='Path to the input image')
+    
+    # Text argument for encoding
+    text_group = parser.add_mutually_exclusive_group()
+    text_group.add_argument('-t', '--text', help='Text to encode in the image')
+    text_group.add_argument('-f', '--file', help='Text file containing data to encode')
+    
+    # Output image path for encoding
+    parser.add_argument('-o', '--output', help='Path for the output image (encoding only)')
+    
+    # Additional options
+    parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose output')
+    parser.add_argument('--capacity', action='store_true', help='Show the image capacity without encoding/decoding')
+    
+    args = parser.parse_args()
+    
+    # Validate arguments
+    if args.encode and not (args.text or args.file):
+        parser.error("Encoding requires either --text or --file argument")
+    
+    if args.output and not args.encode:
+        parser.error("--output can only be used with --encode")
+    
+    return args
+
+def show_capacity(image_path):
+    """
+    Show the estimated capacity of the image for steganography.
+    
+    Args:
+        image_path: Path to the image file
+    """
+    if not validate_image_path(image_path):
+        print(f"Error: '{image_path}' is not a valid image file or is not supported.")
+        sys.exit(1)
+    
+    capacity = estimate_encoding_capacity(image_path)
+    print(f"Image capacity: Approximately {capacity} characters")
+
+def run_encode(args):
+    """
+    Run the encoding operation.
+    
+    Args:
+        args: Command-line arguments
+    """
+    # Validate input image
+    if not validate_image_path(args.image):
+        print(f"Error: '{args.image}' is not a valid image file or is not supported.")
+        sys.exit(1)
+    
+    # Get text to encode
+    text = ""
+    if args.text:
+        text = args.text
+    elif args.file:
+        try:
+            text = safe_text_read(args.file)
+        except Exception as e:
+            print(f"Error reading text file: {str(e)}")
+            sys.exit(1)
+    
+    # Validate output path if provided
+    if args.output and not validate_output_path(args.output):
+        print(f"Error: Cannot write to '{args.output}'. Check directory permissions.")
+        sys.exit(1)
+    
+    # Check capacity
+    try:
+        if not Steganography.can_encode(args.image, text):
+            print("Error: Text is too large for this image.")
+            capacity = estimate_encoding_capacity(args.image)
+            print(f"Maximum capacity: ~{capacity} characters. Your text: {len(text)} characters")
+            sys.exit(1)
+    except SteganographyError as e:
+        print(f"Error: {str(e)}")
+        sys.exit(1)
+    
+    # Encode the message
+    try:
+        print("Encoding message into image...")
+        output_path = Steganography.encode(args.image, text, args.output)
+        print(f"Success! Encoded image saved at: {output_path}")
+    except SteganographyError as e:
+        print(f"Error: {str(e)}")
+        sys.exit(1)
+
+def run_decode(args):
+    """
+    Run the decoding operation.
+    
+    Args:
+        args: Command-line arguments
+    """
+    # Validate input image
+    if not validate_image_path(args.image):
+        print(f"Error: '{args.image}' is not a valid image file or is not supported.")
+        sys.exit(1)
+    
+    # Check if image likely contains hidden data
+    if not is_likely_steganographic_image(args.image):
+        print("Warning: This image may not contain hidden data or uses a different steganography method.")
+    
+    # Decode the message
+    try:
+        print("Extracting hidden message from image...")
+        extracted_text = Steganography.decode(args.image)
+        
+        if not extracted_text:
+            print("No hidden message found or message is empty.")
+            sys.exit(0)
+        
+        print("\nExtracted message:")
+        print("-" * 40)
+        print(extracted_text)
+        print("-" * 40)
+    except SteganographyError as e:
+        print(f"Error: {str(e)}")
+        sys.exit(1)
+
+def main():
+    """Main entry point for the CLI application."""
+    args = parse_arguments()
+    
+    # Configure logging
+    log_level = logging.DEBUG if args.verbose else logging.INFO
+    logging.basicConfig(level=log_level, format='%(levelname)s: %(message)s')
+    
+    # Show capacity if requested
+    if args.capacity:
+        show_capacity(args.image)
+        sys.exit(0)
+    
+    # Run appropriate operation
+    if args.encode:
+        run_encode(args)
+    elif args.decode:
+        run_decode(args)
+
+if __name__ == "__main__":
+    main()
+
+
+================================================================================
+# FILE: main.py
+================================================================================
+
+"""
+Flask web application for steganography.
+"""
+import os
+import uuid
+from flask import Flask, render_template, request, redirect, url_for, flash, send_from_directory, session
+from werkzeug.utils import secure_filename
+from stegano import Steganography, SteganographyError
+from utils import estimate_encoding_capacity, is_likely_steganographic_image
+
+# Initialize Flask app
+app = Flask(__name__)
+app.secret_key = os.environ.get("SESSION_SECRET", "default_secret_key_for_development")
+
+# Configure file upload settings
+UPLOAD_FOLDER = 'uploads'
+OUTPUT_FOLDER = 'outputs'
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
+
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(OUTPUT_FOLDER, exist_ok=True)
+
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.config['OUTPUT_FOLDER'] = OUTPUT_FOLDER
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
+
+def allowed_file(filename):
+    """Check if the uploaded file has an allowed extension."""
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+@app.route('/')
+def index():
+    """Render the main page of the application."""
+    return render_template('index.html')
+
+@app.route('/encode', methods=['GET', 'POST'])
+def encode():
+    """Handle encoding requests."""
+    if request.method == 'POST':
+        # Check if a file was uploaded
+        if 'file' not in request.files:
+            flash('No file part', 'error')
+            return redirect(request.url)
+        
+        file = request.files['file']
+        
+        # Check if the user submitted an empty form
+        if file.filename == '':
+            flash('No selected file', 'error')
+            return redirect(request.url)
+        
+        # Get the secret message to encode
+        message = request.form.get('message', '')
+        if not message:
+            flash('No message to hide', 'error')
+            return redirect(request.url)
+        
+        # Process the file
+        if file and allowed_file(file.filename):
+            # Generate a unique filename
+            original_filename = secure_filename(file.filename)
+            unique_id = str(uuid.uuid4().hex)
+            filename = f"{unique_id}_{original_filename}"
+            
+            # Save the uploaded file
+            input_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            file.save(input_path)
+            
+            # Generate the output filename
+            name, ext = os.path.splitext(filename)
+            output_filename = f"{name}_encoded.png"
+            output_path = os.path.join(app.config['OUTPUT_FOLDER'], output_filename)
+            
+            try:
+                # Check if the image has enough capacity
+                if not Steganography.can_encode(input_path, message):
+                    capacity = estimate_encoding_capacity(input_path)
+                    flash(f'Text too large. Max capacity: ~{capacity} characters', 'error')
+                    return redirect(request.url)
+                
+                # Encode the message
+                Steganography.encode(input_path, message, output_path)
+                
+                # Store the output filename in the session
+                session['encoded_file'] = output_filename
+                
+                # Redirect to the download page
+                flash('Message successfully encoded!', 'success')
+                return redirect(url_for('download_encoded'))
+                
+            except SteganographyError as e:
+                flash(f'Error encoding the message: {str(e)}', 'error')
+                return redirect(request.url)
+            finally:
+                # Clean up the uploaded file
+                if os.path.exists(input_path):
+                    os.remove(input_path)
+        
+        else:
+            flash('File type not allowed. Please upload a PNG or JPG file.', 'error')
+            return redirect(request.url)
+    
+    # GET request - show the upload form
+    return render_template('encode.html')
+
+@app.route('/download-encoded')
+def download_encoded():
+    """Show the download page for encoded images."""
+    encoded_file = session.get('encoded_file')
+    if not encoded_file:
+        flash('No encoded file available', 'error')
+        return redirect(url_for('encode'))
+    
+    return render_template('download.html', filename=encoded_file)
+
+@app.route('/decode', methods=['GET', 'POST'])
+def decode():
+    """Handle decoding requests."""
+    if request.method == 'POST':
+        # Check if a file was uploaded
+        if 'file' not in request.files:
+            flash('No file part', 'error')
+            return redirect(request.url)
+        
+        file = request.files['file']
+        
+        # Check if the user submitted an empty form
+        if file.filename == '':
+            flash('No selected file', 'error')
+            return redirect(request.url)
+        
+        # Process the file
+        if file and allowed_file(file.filename):
+            # Generate a unique filename
+            filename = secure_filename(file.filename)
+            unique_id = str(uuid.uuid4().hex)
+            filename = f"{unique_id}_{filename}"
+            
+            # Save the uploaded file
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            file.save(file_path)
+            
+            try:
+                # Check if the image likely contains hidden data
+                if not is_likely_steganographic_image(file_path):
+                    flash('Warning: This image may not contain hidden data', 'warning')
+                
+                # Decode the message
+                extracted_text = Steganography.decode(file_path)
+                
+                if not extracted_text:
+                    flash('No hidden message found or message is empty', 'warning')
+                    return redirect(request.url)
+                
+                # Store the decoded message and redirect to the results page
+                session['decoded_message'] = extracted_text
+                
+                # Redirect to the results page
+                return redirect(url_for('decode_results'))
+                
+            except SteganographyError as e:
+                flash(f'Error decoding the message: {str(e)}', 'error')
+                return redirect(request.url)
+            finally:
+                # Clean up the uploaded file
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+        
+        else:
+            flash('File type not allowed. Please upload a PNG or JPG file.', 'error')
+            return redirect(request.url)
+    
+    # GET request - show the upload form
+    return render_template('decode.html')
+
+@app.route('/decode-results')
+def decode_results():
+    """Show the results of decoding."""
+    message = session.get('decoded_message')
+    if not message:
+        flash('No decoded message available', 'error')
+        return redirect(url_for('decode'))
+    
+    return render_template('results.html', message=message)
+
+@app.route('/download/<filename>')
+def download_file(filename):
+    """Handle file downloads."""
+    return send_from_directory(app.config['OUTPUT_FOLDER'], filename, as_attachment=True)
+
+@app.route('/about')
+def about():
+    """Render the about page."""
+    return render_template('about.html')
+
+@app.errorhandler(404)
+def page_not_found(e):
+    """Handle 404 errors."""
+    return render_template('404.html'), 404
+
+@app.errorhandler(413)
+def file_too_large(e):
+    """Handle file size exceeded error."""
+    flash('The file is too large. Maximum size is 16MB.', 'error')
+    return redirect(url_for('index'))
+
+@app.errorhandler(500)
+def server_error(e):
+    """Handle server errors."""
+    return render_template('500.html'), 500
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=True)
+
+================================================================================
+# FILE: stegano.py
+================================================================================
+
+"""
+Core steganography functionality for hiding and extracting text in images.
+"""
+import os
+import numpy as np
+from PIL import Image
+import logging
+
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+
+class SteganographyError(Exception):
+    """Custom exception for steganography operations."""
+    pass
+
+class Steganography:
+    """
+    Class that provides methods for encoding and decoding text in images.
+    """
+    
+    @staticmethod
+    def text_to_binary(text):
+        """Convert text to binary representation."""
+        if not text:
+            return ""
+        binary = ''.join(format(ord(char), '08b') for char in text)
+        # Add delimiter to know where the text ends
+        binary += '1111111111111110'  # 16-bit delimiter
+        return binary
+    
+    @staticmethod
+    def binary_to_text(binary):
+        """Convert binary representation back to text."""
+        if not binary:
+            return ""
+        
+        # Look for the delimiter
+        delimiter_index = binary.find('1111111111111110')
+        if delimiter_index != -1:
+            binary = binary[:delimiter_index]
+        
+        # Process 8 bits at a time to recover characters
+        text = ""
+        for i in range(0, len(binary), 8):
+            if i + 8 <= len(binary):
+                byte = binary[i:i+8]
+                text += chr(int(byte, 2))
+        return text
+    
+    @staticmethod
+    def can_encode(image_path, text):
+        """
+        Check if the image has enough capacity to encode the text.
+        
+        Args:
+            image_path: Path to the image file
+            text: Text to encode
+            
+        Returns:
+            bool: True if the image can store the text, False otherwise
+        """
+        try:
+            with Image.open(image_path) as img:
+                # Get image dimensions
+                width, height = img.size
+                
+                # Calculate max capacity (3 color channels, 1 bit per channel)
+                max_bits = width * height * 3 * 1
+                
+                # Calculate required bits (8 bits per character + delimiter)
+                required_bits = len(text) * 8 + 16  # 16 bits for delimiter
+                
+                return max_bits >= required_bits
+        except Exception as e:
+            raise SteganographyError(f"Error checking image capacity: {str(e)}")
+    
+    @staticmethod
+    def encode(image_path, text, output_path=None):
+        """
+        Hide text data within an image.
+        
+        Args:
+            image_path: Path to the original image
+            text: Text to hide in the image
+            output_path: Path to save the steganographic image
+            
+        Returns:
+            str: Path to the output image
+        """
+        try:
+            if not text:
+                raise SteganographyError("No text provided for encoding")
+            
+            # Prepare output path
+            if not output_path:
+                name, ext = os.path.splitext(image_path)
+                # Force PNG format to avoid compression issues
+                output_path = f"{name}_encoded.png"
+            
+            # Check if we can encode the text in the image
+            if not Steganography.can_encode(image_path, text):
+                raise SteganographyError("Text is too large for this image")
+            
+            # Open image and convert to RGB
+            with Image.open(image_path) as img:
+                # Convert image to RGB if not already
+                if img.mode != 'RGB':
+                    img = img.convert('RGB')
+                
+                # Get image as numpy array
+                img_array = np.array(img)
+                height, width, channels = img_array.shape
+                
+                # Convert text to binary
+                binary_text = Steganography.text_to_binary(text)
+                
+                # Flatten the image array for easier looping
+                flattened = img_array.reshape(-1)
+                
+                # Counter for binary text position
+                binary_index = 0
+                binary_length = len(binary_text)
+                
+                # Loop through pixels and hide data
+                for i in range(0, len(flattened), 1):
+                    if binary_index < binary_length:
+                        # LSB encoding: Replace the least significant bit
+                        if binary_text[binary_index] == '1':
+                            # Set LSB to 1 (ensure it's 1)
+                            if flattened[i] % 2 == 0:  # If LSB is 0
+                                flattened[i] += 1
+                        else:
+                            # Set LSB to 0 (ensure it's 0)
+                            if flattened[i] % 2 == 1:  # If LSB is 1
+                                flattened[i] -= 1
+                        
+                        binary_index += 1
+                    else:
+                        # We've encoded all our data
+                        break
+                
+                # Reshape back to original dimensions
+                img_array_modified = flattened.reshape(height, width, channels)
+                
+                # Create a new image from the modified array
+                encoded_img = Image.fromarray(img_array_modified.astype('uint8'), 'RGB')
+                
+                # Save the image
+                encoded_img.save(output_path)
+                
+                return output_path
+                
+        except SteganographyError as e:
+            raise e
+        except Exception as e:
+            raise SteganographyError(f"Error encoding message: {str(e)}")
+    
+    @staticmethod
+    def decode(image_path):
+        """
+        Extract hidden text from a steganographic image.
+        
+        Args:
+            image_path: Path to the steganographic image
+            
+        Returns:
+            str: Extracted text
+        """
+        try:
+            # Open the image
+            with Image.open(image_path) as img:
+                # Convert image to RGB if not already
+                if img.mode != 'RGB':
+                    img = img.convert('RGB')
+                
+                # Get image as numpy array
+                img_array = np.array(img)
+                
+                # Flatten the array
+                flattened = img_array.reshape(-1)
+                
+                # Extract the LSB from each byte
+                binary_message = ""
+                for i in range(len(flattened)):
+                    binary_message += str(flattened[i] & 1)
+                    
+                    # Look for the delimiter as we go to stop early if possible
+                    if len(binary_message) >= 16 and binary_message[-16:] == '1111111111111110':
+                        binary_message = binary_message[:-16]  # Remove the delimiter
+                        break
+                
+                # Convert binary back to text
+                extracted_text = Steganography.binary_to_text(binary_message)
+                
+                return extracted_text
+                
+        except Exception as e:
+            raise SteganographyError(f"Error decoding message: {str(e)}")
+
+
+================================================================================
+# FILE: utils.py
+================================================================================
+
+"""
+Utility functions for the steganography application.
+"""
+import os
+import sys
+import time
+from PIL import Image
+
+def validate_image_path(file_path):
+    """
+    Validate that the file exists and is a supported image format.
+    
+    Args:
+        file_path: Path to the image file
+        
+    Returns:
+        bool: True if valid, False otherwise
+    """
+    if not os.path.exists(file_path):
+        return False
+    
+    try:
+        with Image.open(file_path) as img:
+            format = img.format.lower() if img.format else ""
+            return format in ['png', 'jpg', 'jpeg']
+    except:
+        return False
+
+def validate_output_path(file_path):
+    """
+    Validate that the output directory exists and is writable.
+    
+    Args:
+        file_path: Path where output will be written
+        
+    Returns:
+        bool: True if valid, False otherwise
+    """
+    directory = os.path.dirname(file_path)
+    if not directory:  # If no directory is specified, use current directory
+        directory = "."
+    
+    return os.path.isdir(directory) and os.access(directory, os.W_OK)
+
+def display_progress(current, total, bar_length=40):
+    """
+    Display a progress bar for long operations.
+    
+    Args:
+        current: Current progress value
+        total: Total value representing 100%
+        bar_length: Length of the progress bar in characters
+    """
+    progress = min(1.0, float(current) / total)
+    arrow = '=' * int(round(bar_length * progress))
+    spaces = ' ' * (bar_length - len(arrow))
+    
+    sys.stdout.write(f"\rProgress: [{arrow}{spaces}] {int(progress * 100)}%")
+    sys.stdout.flush()
+    
+    if progress >= 1.0:
+        sys.stdout.write('\n')
+
+def estimate_encoding_capacity(image_path):
+    """
+    Estimate how many characters can be hidden in the image.
+    
+    Args:
+        image_path: Path to the image file
+        
+    Returns:
+        int: Estimated number of characters that can be hidden
+    """
+    try:
+        with Image.open(image_path) as img:
+            width, height = img.size
+            # Each pixel has 3 color channels (R,G,B) and we use 1 bit per channel
+            # 8 bits = 1 character, plus some overhead for the delimiter
+            max_bits = width * height * 3
+            # Leave some space for the delimiter
+            max_chars = (max_bits - 16) // 8
+            return max_chars
+    except:
+        return 0
+
+def is_likely_steganographic_image(image_path):
+    """
+    Try to determine if the image likely contains hidden data.
+    This is a heuristic and not foolproof.
+    
+    Args:
+        image_path: Path to the image file
+        
+    Returns:
+        bool: True if the image likely contains hidden data
+    """
+    try:
+        with Image.open(image_path) as img:
+            if img.format.lower() != 'png':
+                # JPEG compression disrupts steganography, so if it's not PNG, less likely
+                return False
+            
+            # Check for patterns in LSBs that might indicate hidden data
+            img_array = img.convert('RGB')
+            pixels = list(img_array.getdata())
+            
+            # Sample a portion of the image pixels
+            sample_size = min(1000, len(pixels))
+            lsb_ones = 0
+            
+            for i in range(sample_size):
+                r, g, b = pixels[i]
+                # Count LSBs that are 1
+                lsb_ones += (r & 1) + (g & 1) + (b & 1)
+            
+            # Calculate the ratio of 1s in the LSBs
+            lsb_ratio = lsb_ones / (sample_size * 3)
+            
+            # In natural images, the distribution of 0s and 1s in LSBs is roughly equal
+            # Significant deviation might indicate steganography
+            return 0.45 <= lsb_ratio <= 0.55
+    except:
+        return False
+
+def safe_text_read(file_path):
+    """
+    Safely read text from a file.
+    
+    Args:
+        file_path: Path to the text file
+        
+    Returns:
+        str: Text content of the file
+    """
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            return f.read()
+    except Exception as e:
+        raise Exception(f"Error reading text file: {str(e)}")
+
+
+================================================================================
+# FILE: README.md
+================================================================================
+
+# StegaPy - Python Steganography Tool
+
+StegaPy is a steganography application for hiding and extracting text data within images. It uses least significant bit (LSB) steganography to embed text in image files with minimal visual impact. The application includes both a command-line interface and a web-based interface.
+
+## Features
+
+- Hide text messages within common image formats (PNG, JPG)
+- Extract hidden text from steganographic images
+- Preservation of image quality while embedding data
+- Capacity estimation for images
+- Support for both direct text input and text files
+- Progress indicators for long operations
+- Comprehensive error handling
+- User-friendly web interface
+- Real-time capacity checking
+
+## Requirements
+
+- Python 3.x
+- Flask (for web interface)
+- Pillow (PIL Fork)
+- NumPy
+- Gunicorn (for deploying web interface)
+
+## Web Interface
+
+The web interface provides an easy-to-use option for encoding and decoding messages without needing to use the command line. To run the web application:
+
+```
+gunicorn --bind 0.0.0.0:5000 main:app
+```
+
+Then navigate to http://localhost:5000 in your browser.
+
+The web interface features:
+- Simple file upload for images
+- Text input for messages to hide
+- Automatic capacity checking
+- Direct download of encoded images
+- Clean display of decoded messages
+
+## Command-Line Usage
+
+### Basic Commands
+
+**Hide text in an image:**
+
+
+================================================================================
+# FILE: backup.py
+================================================================================
+
+#!/usr/bin/env python3
+"""
+Backup script for the steganography application.
+This script creates a copy of all important files in a backup directory.
+"""
+import os
+import shutil
+import datetime
+
+def create_backup():
+    """Create a backup of the steganography application."""
+    # Create backup directory with timestamp
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_dir = f"backup_{timestamp}"
+    
+    if not os.path.exists(backup_dir):
+        os.makedirs(backup_dir)
+    
+    # Files to backup
+    files_to_backup = [
+        "cli.py",
+        "main.py",
+        "stegano.py",
+        "utils.py",
+        "README.md",
+        "generated-icon.png",
+        "secret.png"
+    ]
+    
+    # Directories to backup
+    dirs_to_backup = [
+        "templates",
+        "uploads",
+        "outputs"
+    ]
+    
+    # Copy files
+    for file in files_to_backup:
+        if os.path.exists(file):
+            shutil.copy2(file, os.path.join(backup_dir, file))
+            print(f"Backed up: {file}")
+    
+    # Copy directories
+    for directory in dirs_to_backup:
+        if os.path.exists(directory):
+            dest_dir = os.path.join(backup_dir, directory)
+            shutil.copytree(directory, dest_dir)
+            print(f"Backed up directory: {directory}")
+    
+    print(f"\nBackup completed! All files saved to: {backup_dir}")
+    print(f"Total size: {get_directory_size(backup_dir) / (1024*1024):.2f} MB")
+
+def get_directory_size(directory):
+    """Calculate the total size of a directory in bytes."""
+    total_size = 0
+    for dirpath, dirnames, filenames in os.walk(directory):
+        for filename in filenames:
+            filepath = os.path.join(dirpath, filename)
+            if not os.path.islink(filepath):
+                total_size += os.path.getsize(filepath)
+    return total_size
+
+if __name__ == "__main__":
+    create_backup()
+
+================================================================================
+# FILE: templates/base.html
+================================================================================
+
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Steganography App{% endblock %}</title>
+    <link rel="stylesheet" href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css">
+    <style>
+        .footer {
+            margin-top: 2rem;
+            padding: 1rem 0;
+            border-top: 1px solid var(--bs-gray-700);
+        }
+        .jumbotron {
+            padding: 2rem;
+            margin-bottom: 2rem;
+            background-color: var(--bs-dark);
+            border-radius: 0.3rem;
+        }
+        .hidden-message {
+            background-color: var(--bs-dark);
+            padding: 1rem;
+            border-radius: 0.3rem;
+            border: 1px solid var(--bs-gray-700);
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
+        <div class="container">
+            <a class="navbar-brand" href="{{ url_for('index') }}">Steganography App</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.path == url_for('index') %}active{% endif %}" href="{{ url_for('index') }}">Home</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.path == url_for('encode') %}active{% endif %}" href="{{ url_for('encode') }}">Encode</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.path == url_for('decode') %}active{% endif %}" href="{{ url_for('decode') }}">Decode</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.path == url_for('about') %}active{% endif %}" href="{{ url_for('about') }}">About</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category if category != 'error' else 'danger' }} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+    </div>
+
+    <footer class="footer mt-auto py-3">
+        <div class="container">
+            <div class="row">
+                <div class="col-md-6">
+                    <p class="text-muted">© 2025 Steganography App</p>
+                </div>
+                <div class="col-md-6 text-md-end">
+                    <a href="{{ url_for('about') }}" class="text-muted">About</a>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
+
+================================================================================
+# FILE: templates/index.html
+================================================================================
+
+{% extends 'base.html' %}
+
+{% block title %}Home - Steganography App{% endblock %}
+
+{% block content %}
+<div class="jumbotron">
+    <h1 class="display-4">Hide Messages in Images</h1>
+    <p class="lead">Steganography allows you to hide secret text messages inside regular images. The image will look normal to everyone, but will contain your hidden message.</p>
+    <hr class="my-4">
+    <p>Use our simple tools to encode messages into images or extract hidden messages from images you've received.</p>
+    <div class="d-grid gap-2 d-md-flex justify-content-md-start">
+        <a href="{{ url_for('encode') }}" class="btn btn-primary btn-lg me-md-2">Hide a Message</a>
+        <a href="{{ url_for('decode') }}" class="btn btn-secondary btn-lg">Reveal a Message</a>
+    </div>
+</div>
+
+<div class="row mt-5">
+    <div class="col-md-4">
+        <div class="card mb-4">
+            <div class="card-body">
+                <h5 class="card-title">Hide Messages</h5>
+                <p class="card-text">Hide your secret text inside an image. The image will look unchanged to the human eye.</p>
+                <a href="{{ url_for('encode') }}" class="btn btn-primary">Encode</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card mb-4">
+            <div class="card-body">
+                <h5 class="card-title">Reveal Messages</h5>
+                <p class="card-text">Extract hidden text from an image that was created using our tool.</p>
+                <a href="{{ url_for('decode') }}" class="btn btn-primary">Decode</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card mb-4">
+            <div class="card-body">
+                <h5 class="card-title">How It Works</h5>
+                <p class="card-text">Learn about the technology behind steganography and how we hide data in images.</p>
+                <a href="{{ url_for('about') }}" class="btn btn-primary">Learn More</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+================================================================================
+# FILE: templates/encode.html
+================================================================================
+
+{% extends 'base.html' %}
+
+{% block title %}Encode - Steganography App{% endblock %}
+
+{% block content %}
+<h1 class="mb-4">Hide a Message in an Image</h1>
+
+<div class="row">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-body">
+                <form method="POST" enctype="multipart/form-data">
+                    <div class="mb-3">
+                        <label for="file" class="form-label">Select an image file (PNG or JPG)</label>
+                        <input class="form-control" type="file" id="file" name="file" accept=".png,.jpg,.jpeg" required>
+                        <div class="form-text">Max file size: 16MB</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="message" class="form-label">Secret message to hide</label>
+                        <textarea class="form-control" id="message" name="message" rows="5" required></textarea>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Encode Message</button>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">How Encoding Works</h5>
+                <p class="card-text">
+                    Our steganography tool hides your message in the image by making tiny, imperceptible changes 
+                    to the color values of pixels. The modified image will look identical to the original to the naked eye.
+                </p>
+                <h6 class="mt-3">Tips:</h6>
+                <ul>
+                    <li>Larger images can store more text</li>
+                    <li>PNG images work best for steganography</li>
+                    <li>The encoded image will be saved as a PNG</li>
+                    <li>Keep your message reasonable in length</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+================================================================================
+# FILE: templates/download.html
+================================================================================
+
+{% extends 'base.html' %}
+
+{% block title %}Download - Steganography App{% endblock %}
+
+{% block content %}
+<div class="text-center">
+    <h1 class="mb-4">Message Successfully Hidden!</h1>
+    
+    <div class="alert alert-success" role="alert">
+        Your message has been hidden in the image. Download it now to share with others.
+    </div>
+    
+    <div class="my-5">
+        <a href="{{ url_for('download_file', filename=filename) }}" class="btn btn-lg btn-primary">
+            <i class="bi bi-download me-2"></i> Download Encoded Image
+        </a>
+    </div>
+    
+    <div class="card mb-4 mx-auto" style="max-width: 540px;">
+        <div class="card-body">
+            <h5 class="card-title">What's Next?</h5>
+            <p class="card-text">
+                Share this image with the person who should receive your hidden message. 
+                They can use our "Decode" tool to extract the message from the image.
+            </p>
+            <div class="d-grid gap-2">
+                <a href="{{ url_for('encode') }}" class="btn btn-outline-primary">Hide Another Message</a>
+                <a href="{{ url_for('index') }}" class="btn btn-outline-secondary">Return to Home</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+================================================================================
+# FILE: templates/decode.html
+================================================================================
+
+{% extends 'base.html' %}
+
+{% block title %}Decode - Steganography App{% endblock %}
+
+{% block content %}
+<h1 class="mb-4">Extract Hidden Message</h1>
+
+<div class="row">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-body">
+                <form method="POST" enctype="multipart/form-data">
+                    <div class="mb-3">
+                        <label for="file" class="form-label">Select an image with a hidden message</label>
+                        <input class="form-control" type="file" id="file" name="file" accept=".png,.jpg,.jpeg" required>
+                        <div class="form-text">Max file size: 16MB</div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Extract Message</button>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">How Decoding Works</h5>
+                <p class="card-text">
+                    Our steganography tool analyzes the image to find the hidden message. It examines the 
+                    least significant bits of color values in each pixel to extract the hidden data.
+                </p>
+                <h6 class="mt-3">Important Notes:</h6>
+                <ul>
+                    <li>Only images encoded with our tool can be decoded</li>
+                    <li>The image must not have been modified or resized</li>
+                    <li>If image editing or compression occurred, the message may be lost</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+================================================================================
+# FILE: templates/results.html
+================================================================================
+
+{% extends 'base.html' %}
+
+{% block title %}Decoded Message - Steganography App{% endblock %}
+
+{% block content %}
+<div class="text-center">
+    <h1 class="mb-4">Hidden Message Found!</h1>
+    
+    <div class="alert alert-success" role="alert">
+        The message was successfully extracted from the image.
+    </div>
+    
+    <div class="my-5">
+        <div class="card mx-auto" style="max-width: 700px;">
+            <div class="card-header">
+                <h5 class="mb-0">Hidden Message</h5>
+            </div>
+            <div class="card-body">
+                <div class="hidden-message p-3 mb-3 text-start">
+                    <pre class="mb-0" style="white-space: pre-wrap;">{{ message }}</pre>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="card mb-4 mx-auto" style="max-width: 540px;">
+        <div class="card-body">
+            <h5 class="card-title">What's Next?</h5>
+            <div class="d-grid gap-2">
+                <a href="{{ url_for('decode') }}" class="btn btn-outline-primary">Decode Another Message</a>
+                <a href="{{ url_for('encode') }}" class="btn btn-outline-primary">Hide a New Message</a>
+                <a href="{{ url_for('index') }}" class="btn btn-outline-secondary">Return to Home</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+================================================================================
+# FILE: templates/about.html
+================================================================================
+
+{% extends 'base.html' %}
+
+{% block title %}About - Steganography App{% endblock %}
+
+{% block content %}
+<h1 class="mb-4">About Steganography</h1>
+
+<div class="row">
+    <div class="col-lg-8">
+        <div class="card mb-4">
+            <div class="card-body">
+                <h2 class="card-title h4">What is Steganography?</h2>
+                <p class="card-text">
+                    Steganography is the practice of concealing a message within another message or a physical object. 
+                    In digital steganography, electronic communications may include steganographic coding inside of a 
+                    transport layer, such as a document file, image file, program, or protocol.
+                </p>
+                <p class="card-text">
+                    Unlike cryptography, which focuses on making a message unreadable, steganography focuses on hiding 
+                    the existence of the message altogether. If a person or program can't detect that a file contains 
+                    hidden data, they won't attempt to decrypt it.
+                </p>
+            </div>
+        </div>
+
+        <div class="card mb-4">
+            <div class="card-body">
+                <h2 class="card-title h4">How Our Tool Works</h2>
+                <p class="card-text">
+                    Our steganography application uses the LSB (Least Significant Bit) technique to hide information 
+                    in image files. Here's how it works:
+                </p>
+                <ol>
+                    <li>We convert your text message into binary data (1s and 0s)</li>
+                    <li>We take your image and analyze its pixels</li>
+                    <li>For each bit of your message, we modify the least significant bit of a pixel's color value</li>
+                    <li>These changes are so subtle that the human eye cannot detect them</li>
+                    <li>The resulting image looks identical but contains your hidden message</li>
+                </ol>
+                <p class="card-text">
+                    To extract a message, the process is reversed: we analyze the least significant bits of each pixel 
+                    to reconstruct the hidden binary data, then convert it back to text.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-4">
+        <div class="card mb-4">
+            <div class="card-body">
+                <h2 class="card-title h4">Use Cases</h2>
+                <ul class="list-group list-group-flush">
+                    <li class="list-group-item">Secure communication</li>
+                    <li class="list-group-item">Digital watermarking</li>
+                    <li class="list-group-item">Secret sharing</li>
+                    <li class="list-group-item">Privacy protection</li>
+                    <li class="list-group-item">Fun and educational purposes</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="card mb-4">
+            <div class="card-body">
+                <h2 class="card-title h4">Limitations</h2>
+                <p class="card-text">
+                    While our tool provides a simple way to hide messages in images, it does have some limitations:
+                </p>
+                <ul>
+                    <li>The capacity for hidden data depends on the image size</li>
+                    <li>Image compression or editing can destroy the hidden message</li>
+                    <li>This tool provides basic steganography without encryption</li>
+                    <li>Advanced steganography detection tools might detect the presence of hidden data</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-body">
+                <h2 class="card-title h4">Future Enhancements</h2>
+                <ul class="list-group list-group-flush">
+                    <li class="list-group-item">Password protection for hidden content</li>
+                    <li class="list-group-item">Support for audio steganography</li>
+                    <li class="list-group-item">Ability to hide files, not just text</li>
+                    <li class="list-group-item">Improved capacity and resistance to detection</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+================================================================================
+# FILE: templates/404.html
+================================================================================
+
+{% extends 'base.html' %}
+
+{% block title %}Page Not Found - Steganography App{% endblock %}
+
+{% block content %}
+<div class="text-center my-5 py-5">
+    <h1 class="display-1">404</h1>
+    <h2 class="mb-4">Page Not Found</h2>
+    <p class="lead mb-5">The page you're looking for doesn't exist or has been moved.</p>
+    <a href="{{ url_for('index') }}" class="btn btn-primary">Return to Home</a>
+</div>
+{% endblock %}
+
+================================================================================
+# FILE: templates/500.html
+================================================================================
+
+{% extends 'base.html' %}
+
+{% block title %}Server Error - Steganography App{% endblock %}
+
+{% block content %}
+<div class="text-center my-5 py-5">
+    <h1 class="display-1">500</h1>
+    <h2 class="mb-4">Server Error</h2>
+    <p class="lead mb-5">Something went wrong on our end. Please try again later.</p>
+    <a href="{{ url_for('index') }}" class="btn btn-primary">Return to Home</a>
+</div>
+{% endblock %}
