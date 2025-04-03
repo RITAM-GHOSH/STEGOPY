@@ -10,7 +10,20 @@
         Your message has been hidden in the image. Download it now to share with others.
     </div>
     
-    <div class="my-5">
+    {% if auth_code %}
+    <div class="alert alert-warning my-4" role="alert">
+        <h4 class="alert-heading"><i class="bi bi-shield-lock me-2"></i>Authentication Required</h4>
+        <p>This message is protected with a 4-digit code:</p>
+        <div class="display-4 my-3 fw-bold">{{ auth_code }}</div>
+        <hr>
+        <p class="mb-0">
+            <strong>Important:</strong> Save this code! You or the recipient will need it to decode the message.
+            The code cannot be recovered if lost.
+        </p>
+    </div>
+    {% endif %}
+    
+    <div class="my-4">
         <a href="{{ url_for('download_file', filename=filename) }}" class="btn btn-lg btn-primary">
             <i class="bi bi-download me-2"></i> Download Encoded Image
         </a>
@@ -21,9 +34,13 @@
             <h5 class="card-title">What's Next?</h5>
             <p class="card-text">
                 Share this image with the person who should receive your hidden message. 
+                {% if auth_code %}
+                Don't forget to share the 4-digit authentication code with them securely.
+                {% else %}
                 They can use our "Decode" tool to extract the message from the image.
+                {% endif %}
             </p>
-            <div class="d-grid gap-2">
+            <div class="d-grid gap-2 mt-3">
                 <a href="{{ url_for('encode') }}" class="btn btn-outline-primary">Hide Another Message</a>
                 <a href="{{ url_for('index') }}" class="btn btn-outline-secondary">Return to Home</a>
             </div>

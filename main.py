@@ -78,8 +78,19 @@ def encode():
                     flash(f'Text too large. Max capacity: ~{capacity} characters', 'error')
                     return redirect(request.url)
                 
-                # Encode the message
-                Steganography.encode(input_path, message, output_path)
+                # Check if authentication is required
+                require_auth = request.form.get('requireAuth') == 'true'
+                
+                # Get the message
+                if require_auth:
+                    # Encode with authentication
+                    output_file, auth_code = Steganography.encode(input_path, message, output_path)
+                    session['auth_code'] = auth_code
+                else:
+                    # Encode without authentication by adding a dummy prefix that doesn't start with AUTH:
+                    secured_text = f"NOAUTH:{message}"
+                    output_file = Steganography.encode(input_path, secured_text, output_path)[0]
+                    session['auth_code'] = None
                 
                 # Store the output filename in the session
                 session['encoded_file'] = output_filename
@@ -107,11 +118,13 @@ def encode():
 def download_encoded():
     """Show the download page for encoded images."""
     encoded_file = session.get('encoded_file')
+    auth_code = session.get('auth_code')
+    
     if not encoded_file:
         flash('No encoded file available', 'error')
         return redirect(url_for('encode'))
     
-    return render_template('download.html', filename=encoded_file)
+    return render_template('download.html', filename=encoded_file, auth_code=auth_code)
 
 @app.route('/decode', methods=['GET', 'POST'])
 def decode():
@@ -145,15 +158,22 @@ def decode():
                 if not is_likely_steganographic_image(file_path):
                     flash('Warning: This image may not contain hidden data', 'warning')
                 
-                # Decode the message
-                extracted_text = Steganography.decode(file_path)
+                # Try to decode the message (without auth code first)
+                result = Steganography.decode(file_path)
                 
-                if not extracted_text:
+                # Check if authentication is required
+                if isinstance(result, dict) and result.get('auth_required'):
+                    # Store the file path in the session for auth checking later
+                    session['pending_decode_file'] = file_path
+                    # Don't delete the file yet, we'll need it for the actual decoding
+                    return redirect(url_for('auth_decode'))
+                
+                if not result:
                     flash('No hidden message found or message is empty', 'warning')
                     return redirect(request.url)
                 
                 # Store the decoded message and redirect to the results page
-                session['decoded_message'] = extracted_text
+                session['decoded_message'] = result
                 
                 # Redirect to the results page
                 return redirect(url_for('decode_results'))
@@ -162,8 +182,8 @@ def decode():
                 flash(f'Error decoding the message: {str(e)}', 'error')
                 return redirect(request.url)
             finally:
-                # Clean up the uploaded file
-                if os.path.exists(file_path):
+                # Clean up the uploaded file only if we're not going to use it for auth decoding
+                if not session.get('pending_decode_file') and os.path.exists(file_path):
                     os.remove(file_path)
         
         else:
@@ -172,6 +192,44 @@ def decode():
     
     # GET request - show the upload form
     return render_template('decode.html')
+
+@app.route('/auth-decode', methods=['GET', 'POST'])
+def auth_decode():
+    """Handle authentication for protected messages."""
+    # Check if there's a pending decode
+    file_path = session.get('pending_decode_file')
+    if not file_path:
+        flash('No image to decode', 'error')
+        return redirect(url_for('decode'))
+    
+    if request.method == 'POST':
+        # Get the auth code from the form
+        auth_code = request.form.get('auth_code')
+        if not auth_code:
+            flash('Please enter the authentication code', 'error')
+            return redirect(url_for('auth_decode'))
+        
+        try:
+            # Decode with the auth code
+            extracted_text = Steganography.decode(file_path, auth_code)
+            
+            # Store the decoded message
+            session['decoded_message'] = extracted_text
+            
+            # Clean up
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            session.pop('pending_decode_file', None)
+            
+            # Redirect to results
+            return redirect(url_for('decode_results'))
+            
+        except SteganographyError as e:
+            flash(f'Error: {str(e)}', 'error')
+            return redirect(url_for('auth_decode'))
+    
+    # GET request - show the auth form
+    return render_template('auth_decode.html')
 
 @app.route('/decode-results')
 def decode_results():

@@ -1,0 +1,42 @@
+{% extends 'base.html' %}
+
+{% block title %}Authentication Required - Steganography App{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8 col-lg-6">
+        <div class="card shadow">
+            <div class="card-header bg-primary text-white">
+                <h2 class="h4 mb-0"><i class="bi bi-shield-lock me-2"></i>Authentication Required</h2>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-info" role="alert">
+                    <i class="bi bi-info-circle me-2"></i>
+                    This image contains a protected message that requires an authentication code to decode.
+                </div>
+                
+                <form method="POST">
+                    <div class="mb-4">
+                        <label for="auth_code" class="form-label">Enter 4-digit Authentication Code</label>
+                        <input type="text" class="form-control form-control-lg text-center" 
+                               id="auth_code" name="auth_code" placeholder="Enter code" 
+                               pattern="[0-9]{4}" maxlength="4" required>
+                        <div class="form-text">
+                            The 4-digit code was provided when the message was encoded.
+                        </div>
+                    </div>
+                    
+                    <div class="d-grid gap-2">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-unlock me-2"></i>Decrypt Message
+                        </button>
+                        <a href="{{ url_for('decode') }}" class="btn btn-outline-secondary">
+                            <i class="bi bi-arrow-left me-2"></i>Go Back
+                        </a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

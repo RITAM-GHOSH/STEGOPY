@@ -43,6 +43,9 @@ def parse_arguments():
     # Output image path for encoding
     parser.add_argument('-o', '--output', help='Path for the output image (encoding only)')
     
+    # Authentication code for decoding
+    parser.add_argument('-a', '--auth', help='Authentication code for decoding protected images')
+    
     # Additional options
     parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose output')
     parser.add_argument('--capacity', action='store_true', help='Show the image capacity without encoding/decoding')
@@ -114,8 +117,10 @@ def run_encode(args):
     # Encode the message
     try:
         print("Encoding message into image...")
-        output_path = Steganography.encode(args.image, text, args.output)
+        output_path, auth_code = Steganography.encode(args.image, text, args.output)
         print(f"Success! Encoded image saved at: {output_path}")
+        print(f"IMPORTANT: Your authentication code is: {auth_code}")
+        print("Keep this code safe! You will need it to decode the message.")
     except SteganographyError as e:
         print(f"Error: {str(e)}")
         sys.exit(1)
@@ -139,7 +144,21 @@ def run_decode(args):
     # Decode the message
     try:
         print("Extracting hidden message from image...")
-        extracted_text = Steganography.decode(args.image)
+        
+        # First attempt to decode without auth code
+        result = Steganography.decode(args.image)
+        
+        # Check if authentication is required
+        if isinstance(result, dict) and result.get('auth_required'):
+            if not args.auth:
+                print("\nThis image requires an authentication code to decode.")
+                print("Please run again with the -a/--auth parameter and the 4-digit code.")
+                sys.exit(0)
+            else:
+                # Try again with the provided auth code
+                extracted_text = Steganography.decode(args.image, args.auth)
+        else:
+            extracted_text = result
         
         if not extracted_text:
             print("No hidden message found or message is empty.")
