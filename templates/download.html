@@ -1,0 +1,33 @@
+{% extends 'base.html' %}
+
+{% block title %}Download - Steganography App{% endblock %}
+
+{% block content %}
+<div class="text-center">
+    <h1 class="mb-4">Message Successfully Hidden!</h1>
+    
+    <div class="alert alert-success" role="alert">
+        Your message has been hidden in the image. Download it now to share with others.
+    </div>
+    
+    <div class="my-5">
+        <a href="{{ url_for('download_file', filename=filename) }}" class="btn btn-lg btn-primary">
+            <i class="bi bi-download me-2"></i> Download Encoded Image
+        </a>
+    </div>
+    
+    <div class="card mb-4 mx-auto" style="max-width: 540px;">
+        <div class="card-body">
+            <h5 class="card-title">What's Next?</h5>
+            <p class="card-text">
+                Share this image with the person who should receive your hidden message. 
+                They can use our "Decode" tool to extract the message from the image.
+            </p>
+            <div class="d-grid gap-2">
+                <a href="{{ url_for('encode') }}" class="btn btn-outline-primary">Hide Another Message</a>
+                <a href="{{ url_for('index') }}" class="btn btn-outline-secondary">Return to Home</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

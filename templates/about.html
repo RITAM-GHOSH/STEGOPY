@@ -1,0 +1,90 @@
+{% extends 'base.html' %}
+
+{% block title %}About - Steganography App{% endblock %}
+
+{% block content %}
+<h1 class="mb-4">About Steganography</h1>
+
+<div class="row">
+    <div class="col-lg-8">
+        <div class="card mb-4">
+            <div class="card-body">
+                <h2 class="card-title h4">What is Steganography?</h2>
+                <p class="card-text">
+                    Steganography is the practice of concealing a message within another message or a physical object. 
+                    In digital steganography, electronic communications may include steganographic coding inside of a 
+                    transport layer, such as a document file, image file, program, or protocol.
+                </p>
+                <p class="card-text">
+                    Unlike cryptography, which focuses on making a message unreadable, steganography focuses on hiding 
+                    the existence of the message altogether. If a person or program can't detect that a file contains 
+                    hidden data, they won't attempt to decrypt it.
+                </p>
+            </div>
+        </div>
+
+        <div class="card mb-4">
+            <div class="card-body">
+                <h2 class="card-title h4">How Our Tool Works</h2>
+                <p class="card-text">
+                    Our steganography application uses the LSB (Least Significant Bit) technique to hide information 
+                    in image files. Here's how it works:
+                </p>
+                <ol>
+                    <li>We convert your text message into binary data (1s and 0s)</li>
+                    <li>We take your image and analyze its pixels</li>
+                    <li>For each bit of your message, we modify the least significant bit of a pixel's color value</li>
+                    <li>These changes are so subtle that the human eye cannot detect them</li>
+                    <li>The resulting image looks identical but contains your hidden message</li>
+                </ol>
+                <p class="card-text">
+                    To extract a message, the process is reversed: we analyze the least significant bits of each pixel 
+                    to reconstruct the hidden binary data, then convert it back to text.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-4">
+        <div class="card mb-4">
+            <div class="card-body">
+                <h2 class="card-title h4">Use Cases</h2>
+                <ul class="list-group list-group-flush">
+                    <li class="list-group-item">Secure communication</li>
+                    <li class="list-group-item">Digital watermarking</li>
+                    <li class="list-group-item">Secret sharing</li>
+                    <li class="list-group-item">Privacy protection</li>
+                    <li class="list-group-item">Fun and educational purposes</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="card mb-4">
+            <div class="card-body">
+                <h2 class="card-title h4">Limitations</h2>
+                <p class="card-text">
+                    While our tool provides a simple way to hide messages in images, it does have some limitations:
+                </p>
+                <ul>
+                    <li>The capacity for hidden data depends on the image size</li>
+                    <li>Image compression or editing can destroy the hidden message</li>
+                    <li>This tool provides basic steganography without encryption</li>
+                    <li>Advanced steganography detection tools might detect the presence of hidden data</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-body">
+                <h2 class="card-title h4">Future Enhancements</h2>
+                <ul class="list-group list-group-flush">
+                    <li class="list-group-item">Password protection for hidden content</li>
+                    <li class="list-group-item">Support for audio steganography</li>
+                    <li class="list-group-item">Ability to hide files, not just text</li>
+                    <li class="list-group-item">Improved capacity and resistance to detection</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
